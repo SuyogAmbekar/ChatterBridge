@@ -9,7 +9,7 @@ const BAR_COUNT = 5;
 const BAR_HEIGHT = 100;
 const BAR_WIDTH = 10;
 const BAR_SPACING = 5;
-const OPENAI_API_KEY = process.env.EXPO_PUBLIC_OPENAI_API_KEY as string | undefined;
+const BACKEND_URL = 'http://192.168.1.34:5000'; // Python backend URL - use your computer's IP
 
 export default function SpeechScreen() {
 	const [recording, setRecording] = useState<Audio.Recording | undefined>();
@@ -87,38 +87,42 @@ export default function SpeechScreen() {
 	}
 
 	async function transcribeRecording(uri: string) {
-		if (!OPENAI_API_KEY) {
-			setTranscriptionError('Missing EXPO_PUBLIC_OPENAI_API_KEY');
-			return;
-		}
 		try {
 			setIsTranscribing(true);
 			setTranscriptionError(null);
+			
+			// Create form data with the audio file
 			const formData = new FormData();
-			formData.append('file', {
+			formData.append('audio', {
 				uri,
 				name: 'audio.m4a',
 				type: 'audio/m4a',
 			} as any);
-			formData.append('model', 'whisper-1');
-			// Optionally hint language of speech if user selected one earlier; skipping for now
-			const response = await fetch('https://api.openai.com/v1/audio/transcriptions', {
+
+			// Send to Python backend
+			const response = await fetch(`${BACKEND_URL}/transcribe`, {
 				method: 'POST',
-				headers: {
-					Authorization: `Bearer ${OPENAI_API_KEY}`,
-				},
 				body: formData,
+				headers: {
+					'Content-Type': 'multipart/form-data',
+				},
 			});
+
 			if (!response.ok) {
-				const errText = await response.text();
-				throw new Error(errText);
+				const errorData = await response.json();
+				throw new Error(errorData.error || 'Transcription failed');
 			}
+
 			const data = await response.json();
-			// OpenAI returns { text: string }
-			setTranscribedText(data.text ?? '');
+			
+			if (data.success) {
+				setTranscribedText(data.transcribed_text);
+			} else {
+				setTranscriptionError(data.error || 'Transcription failed');
+			}
 		} catch (error: any) {
 			console.error('Transcription error', error);
-			setTranscriptionError('Failed to transcribe audio');
+			setTranscriptionError(error.message || 'Failed to transcribe audio');
 		} finally {
 			setIsTranscribing(false);
 		}
