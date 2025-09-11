@@ -1,5 +1,9 @@
-import SelectLanguageScreen from '../select-language';
+import { View } from 'react-native';
 
-export default function TabOneScreen() {
-  return <SelectLanguageScreen />;
+export default function BlankTabScreen() {
+  return (
+    <View style={{ flex: 1, backgroundColor: '#fff' }} />
+  );
 }
+
+

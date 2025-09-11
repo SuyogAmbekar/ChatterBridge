@@ -1,5 +1,6 @@
 import React from 'react';
 import { View, Text, StyleSheet } from 'react-native';
+import { theme } from '../theme';
 
 export default function Header({ title, right }) {
   return (
@@ -11,8 +12,10 @@ export default function Header({ title, right }) {
 }
 
 const styles = StyleSheet.create({
-  header:{paddingHorizontal:16,paddingVertical:12,backgroundColor:'#fff',
-    borderBottomWidth:StyleSheet.hairlineWidth,borderBottomColor:'#E5E7EB',
-    flexDirection:'row',alignItems:'center',justifyContent:'space-between'},
-  title:{fontSize:18,fontWeight:'700'}
+  header:{
+    paddingHorizontal:16,paddingVertical:14,backgroundColor: theme.colors.surface,
+    borderBottomWidth:StyleSheet.hairlineWidth,borderBottomColor: theme.colors.border,
+    flexDirection:'row',alignItems:'center',justifyContent:'space-between'
+  },
+  title:{fontSize:20,fontWeight:'800',color: theme.colors.primary}
 });

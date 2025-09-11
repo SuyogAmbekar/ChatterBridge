@@ -5,6 +5,7 @@ import { Audio } from 'expo-av';
 import { Picker } from '@react-native-picker/picker';
 import { languages } from '../select-language';
 import * as Speech from 'expo-speech';
+import { theme } from '../theme';
 
 // Speech Recognition Implementation:
 // 1. Records audio using Expo Audio
@@ -14,8 +15,9 @@ import * as Speech from 'expo-speech';
 
 const BAR_COUNT = 5;
 const BAR_HEIGHT = 100;
-const BAR_WIDTH = 10;
-const BAR_SPACING = 5;
+const BAR_WIDTH = 12;
+const BAR_SPACING = 8;
+const BAR_COLORS = ['#4F46E5', '#06B6D4', '#22C55E', '#F59E0B', '#EF4444'];
 
 // Context options for translation
 const CONTEXT_OPTIONS = [
@@ -50,6 +52,8 @@ export default function SpeechScreen() {
 		Array.from({ length: BAR_COUNT }, () => new Animated.Value(0))
 	).current;
 
+	const pulseAnim = useRef(new Animated.Value(0)).current;
+
 	useEffect(() => {
 		if (isRecording) {
 			const animationsArray = animations.map((anim) =>
@@ -69,9 +73,27 @@ export default function SpeechScreen() {
 				)
 			);
 			Animated.stagger(100, animationsArray).start();
+
+			// Pulsating ring animation
+			Animated.loop(
+				Animated.sequence([
+					Animated.timing(pulseAnim, {
+						toValue: 1,
+						duration: 1200,
+						useNativeDriver: true,
+					}),
+					Animated.timing(pulseAnim, {
+						toValue: 0,
+						duration: 0,
+						useNativeDriver: true,
+					}),
+				])
+			).start();
 		} else {
 			animations.forEach((anim) => anim.stopAnimation());
 			animations.forEach((anim) => anim.setValue(0));
+			pulseAnim.stopAnimation();
+			pulseAnim.setValue(0);
 		}
 	}, [isRecording]);
 
@@ -321,16 +343,29 @@ export default function SpeechScreen() {
 
 	return (
 		<ScrollView style={styles.container} contentContainerStyle={styles.contentContainer}>
-			<TouchableOpacity
-				style={styles.micButton}
-				onPress={isRecording ? stopRecording : startRecording}
-			>
-				<FontAwesome
-					name={isRecording ? 'stop-circle' : 'microphone'}
-					size={80}
-					color={isRecording ? 'red' : 'black'}
+			<View style={styles.micWrapper}>
+				<Animated.View
+					style={[
+						styles.pulseRing,
+						{
+							transform: [
+								{ scale: pulseAnim.interpolate({ inputRange: [0, 1], outputRange: [1, 1.6] }) },
+							],
+							opacity: pulseAnim.interpolate({ inputRange: [0, 1], outputRange: [0.25, 0] }),
+						},
+					]}
 				/>
-			</TouchableOpacity>
+				<TouchableOpacity
+					style={[styles.micButton, isRecording && styles.micButtonActive]}
+					onPress={isRecording ? stopRecording : startRecording}
+				>
+					<FontAwesome
+						name={isRecording ? 'stop' : 'microphone'}
+						size={48}
+						color={theme.colors.primaryText}
+					/>
+				</TouchableOpacity>
+			</View>
 
 			<View style={styles.dancingBarsContainer}>
 				{animations.map((anim, index) => (
@@ -339,13 +374,14 @@ export default function SpeechScreen() {
 						style={[
 							styles.bar,
 							{
+								backgroundColor: BAR_COLORS[index % BAR_COLORS.length],
 								transform: [
 									{
 										scaleY: anim.interpolate({
 											inputRange: [0, 1],
-											outputRange: [0.5, 1.5],
+											outputRange: [0.4, 1.8],
 										}),
-									},
+										},
 								],
 							},
 						]}
@@ -484,7 +520,7 @@ export default function SpeechScreen() {
 const styles = StyleSheet.create({
 	container: {
 		flex: 1,
-		backgroundColor: 'white',
+		backgroundColor: theme.colors.background,
 	},
 	contentContainer: {
 		flexGrow: 1,
@@ -492,22 +528,52 @@ const styles = StyleSheet.create({
 		alignItems: 'center',
 		padding: 20,
 	},
+	micWrapper: {
+		marginBottom: 36,
+		alignItems: 'center',
+		justifyContent: 'center',
+	},
+	pulseRing: {
+		position: 'absolute',
+		width: 140,
+		height: 140,
+		borderRadius: 999,
+		backgroundColor: '#EF4444',
+	},
 	micButton: {
-		marginBottom: 50,
+		width: 120,
+		height: 120,
+		borderRadius: 999,
+		alignItems: 'center',
+		justifyContent: 'center',
+		backgroundColor: theme.colors.primary,
+		shadowColor: '#000',
+		shadowOffset: { width: 0, height: 2 },
+		shadowOpacity: 0.12,
+		shadowRadius: 6,
+		elevation: 4,
+	},
+	micButtonActive: {
+		backgroundColor: '#EF4444',
 	},
 	dancingBarsContainer: {
 		flexDirection: 'row',
 		alignItems: 'flex-end',
-		height: 100,
-		width: '80%',
+		height: 110,
+		width: '86%',
 		justifyContent: 'space-around',
-		marginBottom: 20,
+		marginBottom: 24,
 	},
 	bar: {
 		width: BAR_WIDTH,
-		backgroundColor: 'blue',
 		height: BAR_HEIGHT,
 		marginHorizontal: BAR_SPACING,
+		borderRadius: 10,
+		shadowColor: '#000',
+		shadowOffset: { width: 0, height: 2 },
+		shadowOpacity: 0.12,
+		shadowRadius: 6,
+		elevation: 4,
 	},
 	statusText: {
 		fontSize: 18,
