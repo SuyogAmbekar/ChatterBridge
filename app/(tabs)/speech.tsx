@@ -1,10 +1,10 @@
-import React, { useState, useEffect, useRef } from 'react';
-import { StyleSheet, Text, View, TouchableOpacity, Animated, ScrollView, Alert } from 'react-native';
 import { FontAwesome } from '@expo/vector-icons';
-import { Audio } from 'expo-av';
 import { Picker } from '@react-native-picker/picker';
-import { languages } from '../select-language';
+import { Audio } from 'expo-av';
 import * as Speech from 'expo-speech';
+import React, { useEffect, useRef, useState } from 'react';
+import { Alert, Animated, ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
+import { languages } from '../select-language';
 import { theme } from '../theme';
 
 // Speech Recognition Implementation:
@@ -19,16 +19,9 @@ const BAR_WIDTH = 12;
 const BAR_SPACING = 8;
 const BAR_COLORS = ['#4F46E5', '#06B6D4', '#22C55E', '#F59E0B', '#EF4444'];
 
-// Context options for translation
-const CONTEXT_OPTIONS = [
-	{ label: 'Auto (Default)', value: 'auto' },
-	{ label: 'Formal', value: 'formal' },
-	{ label: 'Casual', value: 'casual' },
-	{ label: 'Technical', value: 'technical' },
-	{ label: 'Literary', value: 'literary' },
-	{ label: 'Medical', value: 'medical' },
-	{ label: 'Legal', value: 'legal' },
-];
+const SERVER_TRANSCRIBE_URL = 'http://192.168.1.34:3000/transcribe';
+const SERVER_TRANSLATE_URL = 'http://192.168.1.34:3000/translate';
+
 
 export default function SpeechScreen() {
 	const [recording, setRecording] = useState<Audio.Recording | undefined>();
@@ -55,24 +48,16 @@ export default function SpeechScreen() {
 	const pulseAnim = useRef(new Animated.Value(0)).current;
 
 	useEffect(() => {
-		if (isRecording) {
-			const animationsArray = animations.map((anim) =>
-				Animated.loop(
-					Animated.sequence([
-						Animated.timing(anim, {
-							toValue: 1,
-							duration: 300,
-							useNativeDriver: true,
-						}),
-						Animated.timing(anim, {
-							toValue: 0,
-							duration: 300,
-							useNativeDriver: true,
-						}),
-					])
-				)
-			);
-			Animated.stagger(100, animationsArray).start();
+	  if (isRecording) {
+	    const animationsArray = animations.map((anim) =>
+	      Animated.loop(
+		Animated.sequence([
+		  Animated.timing(anim, { toValue: 1, duration: 300, useNativeDriver: true, }),
+		  Animated.timing(anim, { toValue: 0, duration: 300, useNativeDriver: true, }),
+		 ])
+	       )
+	     );
+	     Animated.stagger(100, animationsArray).start();
 
 			// Pulsating ring animation
 			Animated.loop(
@@ -166,18 +151,20 @@ export default function SpeechScreen() {
 			// Convert audio to base64 for API
 			const response = await fetch(uri);
 			const blob = await response.blob();
-			const base64Audio = await blobToBase64(blob);
+			const base64 = await blobToBase64(blob);
 			
-			// Use free speech recognition API (Speechmatics)
-			const transcriptionResult = await performSpeechRecognition(base64Audio);
-			
-			if (transcriptionResult.success && transcriptionResult.text) {
-				setTranscribedText(transcriptionResult.text);
-				setDetectedLanguage('English (95.0% confidence)');
-				setShowTranslationOptions(true);
-			} else {
-				setTranscriptionError(transcriptionResult.error || 'Transcription failed');
-			}
+			const r = await fetch(SERVER_TRANSCRIBE_URL, {
+        			method: 'POST',
+        			headers: { 'Content-Type': 'application/json' },
+        			body: JSON.stringify({ audioBase64: base64 }),
+      			});
+     
+
+			const data = await r.json();
+      			if (!r.ok || data.error) throw new Error(data.error || 'Transcription failed');
+
+      			setTranscribedText(data.text);
+				setShowTranslationOptions(true); 
 			
 		} catch (error: any) {
 			console.error('Transcription error:', error);
@@ -190,93 +177,11 @@ export default function SpeechScreen() {
 	async function blobToBase64(blob: Blob): Promise<string> {
 		return new Promise((resolve, reject) => {
 			const reader = new FileReader();
-			reader.onload = () => {
-				const result = reader.result as string;
-				// Remove data URL prefix to get just the base64 string
-				const base64 = result.split(',')[1];
-				resolve(base64);
-			};
+			reader.onloadend = () => 
+		resolve((reader.result as string ).split(',')[1]);
 			reader.onerror = reject;
 			reader.readAsDataURL(blob);
 		});
-	}
-
-	async function performSpeechRecognition(base64Audio: string): Promise<{ success: boolean; text?: string; error?: string }> {
-		try {
-			// Try using a free speech recognition service
-			// For now, we'll use a mock implementation that simulates real recognition
-			// In production, you could use Google Cloud Speech-to-Text, Azure, or other services
-			// TODO: Replace with real API integration
-			
-			// Try to use real speech recognition if possible
-			try {
-				// Attempt to use Web Speech API (works in some browsers)
-				if ('webkitSpeechRecognition' in window || 'SpeechRecognition' in window) {
-					const SpeechRecognition = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
-					const recognition = new SpeechRecognition();
-					
-					recognition.lang = 'en-US';
-					recognition.continuous = false;
-					recognition.interimResults = false;
-					
-					return new Promise((resolve) => {
-						recognition.onresult = (event: any) => {
-							const transcript = event.results[0][0].transcript;
-							resolve({
-								success: true,
-								text: transcript
-							});
-						};
-						
-						recognition.onerror = () => {
-							resolve({
-								success: false,
-								error: 'Web Speech API failed'
-							});
-						};
-						
-						recognition.start();
-					});
-				}
-			} catch (webSpeechError) {
-				console.log('Web Speech API not available, using fallback');
-			}
-			
-			// Fallback to mock implementation
-			// Simulate API call delay
-			await new Promise(resolve => setTimeout(resolve, 2000));
-			
-			// For demo purposes, return a realistic transcription
-			// In a real app, you would send the base64Audio to a speech recognition API
-			const mockTranscriptions = [
-				"Hello, how are you today?",
-				"This is a test of the speech recognition system.",
-				"The weather is beautiful outside.",
-				"I love using this mobile application.",
-				"Can you help me with this task?",
-				"Thank you for your assistance.",
-				"The speech recognition is working perfectly.",
-				"I'm speaking in English right now.",
-				"This technology is amazing.",
-				"Have a wonderful day ahead!"
-			];
-			
-			// Randomly select a transcription for variety
-			const randomIndex = Math.floor(Math.random() * mockTranscriptions.length);
-			const transcribedText = mockTranscriptions[randomIndex];
-			
-			return {
-				success: true,
-				text: transcribedText
-			};
-			
-		} catch (error) {
-			console.error('Speech recognition API error:', error);
-			return {
-				success: false,
-				error: 'Speech recognition service unavailable'
-			};
-		}
 	}
 
 	async function translateText() {
@@ -289,28 +194,16 @@ export default function SpeechScreen() {
 			setIsTranslating(true);
 			setTranslationError(null);
 
-			// For demo purposes, we'll simulate translation
-			// In a real app, you could use Google Translate API or similar
-			
-			// Simulate processing time
-			await new Promise(resolve => setTimeout(resolve, 1500));
-			
-			// Sample translations for demo
-			const translations: { [key: string]: string } = {
-				'es': 'Hola, ¿cómo estás hoy?',
-				'fr': 'Bonjour, comment allez-vous aujourd\'hui?',
-				'de': 'Hallo, wie geht es dir heute?',
-				'hi': 'नमस्ते, आज आप कैसे हैं?',
-				'ja': 'こんにちは、今日はお元気ですか？',
-				'ko': '안녕하세요, 오늘 어떠세요?',
-				'zh': '你好，你今天好吗？',
-				'ar': 'مرحباً، كيف حالك اليوم؟',
-				'ru': 'Привет, как дела сегодня?',
-				'pt': 'Olá, como você está hoje?'
-			};
-			
-			const translatedText = translations[selectedLanguage] || `[Translation to ${selectedLanguage} would appear here]`;
-			setTranslatedText(translatedText);
+			 const r = await fetch(SERVER_TRANSLATE_URL, {
+        		   method: 'POST',
+        		   headers: { 'Content-Type': 'application/json' },
+        		   body: JSON.stringify({ text: transcribedText, targetLanguage: selectedLanguage }),
+      			});
+
+      			 const data = await r.json();
+      			 if (!r.ok || data.error) throw new Error(data.error || 'Translation failed');
+
+      		  setTranslatedText(data.translatedText);
 			
 		} catch (error: any) {
 			console.error('Translation error:', error);
@@ -320,16 +213,11 @@ export default function SpeechScreen() {
 		}
 	}
 
-	function resetAll() {
+	function resetAll(resetUI = true) {
 		setTranscribedText('');
 		setTranslatedText('');
-		setDetectedLanguage('');
-		setTranscriptionError(null);
+		if (resetUI)setSelectedLanguage(undefined);
 		setTranslationError(null);
-		setSelectedLanguage(undefined);
-		setSelectedContext('auto');
-		setShowTranslationOptions(false);
-		setShowDropdown(false);
 	}
 
 	// Function to speak the transcribed text
@@ -431,19 +319,6 @@ export default function SpeechScreen() {
 				<View style={styles.translationOptionsContainer}>
 					<Text style={styles.sectionTitle}>🌍 Translation Options</Text>
 					
-					{/* Context Selection */}
-					<View style={styles.optionRow}>
-						<Text style={styles.optionLabel}>Context:</Text>
-						<Picker
-							selectedValue={selectedContext}
-							onValueChange={(value) => setSelectedContext(value)}
-							style={styles.contextPicker}
-						>
-							{CONTEXT_OPTIONS.map((option) => (
-								<Picker.Item key={option.value} label={option.label} value={option.value} />
-							))}
-						</Picker>
-					</View>
 
 					{/* Target Language Selection */}
 					<View style={styles.optionRow}>
@@ -509,7 +384,7 @@ export default function SpeechScreen() {
 
 			{/* Reset Button */}
 			{(transcribedText || translatedText) && (
-				<TouchableOpacity style={styles.resetButton} onPress={resetAll}>
+				<TouchableOpacity style={styles.resetButton} onPress={() => resetAll(true)}>
 					<Text style={styles.resetButtonText}>🔄 Start New Session</Text>
 				</TouchableOpacity>
 			)}
@@ -677,6 +552,8 @@ const styles = StyleSheet.create({
 		flexDirection: 'row',
 		alignItems: 'center',
 		marginBottom: 15,
+		justifyContent: "space-between",
+  		marginVertical: 8
 	},
 	optionLabel: {
 		fontSize: 16,
@@ -689,8 +566,16 @@ const styles = StyleSheet.create({
 		height: 40,
 	},
 	languagePicker: {
-		flex: 1,
-		height: 40,
+		flex: 1,                
+  		height: 50,             
+  		marginLeft: 10,         
+  		borderWidth: 1,         
+		paddingVertical: 9,
+		fontSize: 16,
+  		lineHeight: 22, 
+  		borderColor: "#ccc",   
+  		borderRadius: 8,        
+  		backgroundColor: "#fff" 
 	},
 	translateButton: {
 		backgroundColor: '#4caf50',
