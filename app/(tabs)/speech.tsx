@@ -1,11 +1,13 @@
 import { FontAwesome } from '@expo/vector-icons';
 import { Picker } from '@react-native-picker/picker';
+import axios from 'axios';
 import { Audio } from 'expo-av';
 import * as Speech from 'expo-speech';
 import React, { useEffect, useRef, useState } from 'react';
 import { Alert, Animated, ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { languages } from '../select-language';
 import { theme } from '../theme';
+
 
 // Speech Recognition Implementation:
 // 1. Records audio using Expo Audio
@@ -19,8 +21,8 @@ const BAR_WIDTH = 12;
 const BAR_SPACING = 8;
 const BAR_COLORS = ['#4F46E5', '#06B6D4', '#22C55E', '#F59E0B', '#EF4444'];
 
-const SERVER_TRANSCRIBE_URL = 'http://192.168.1.34:3000/transcribe';
-const SERVER_TRANSLATE_URL = 'http://192.168.1.34:3000/translate';
+const SERVER_TRANSCRIBE_URL = 'http://192.168.1.33:3000/transcribe';
+const SERVER_TRANSLATE_URL = 'http://192.168.1.33:3000/translate';
 
 
 export default function SpeechScreen() {
@@ -184,34 +186,40 @@ export default function SpeechScreen() {
 		});
 	}
 
-	async function translateText() {
-		if (!transcribedText || !selectedLanguage) {
-			Alert.alert('Error', 'Please select a target language for translation');
-			return;
-		}
+	const translateText = async () => {
+  if (!transcribedText || !selectedLanguage) return;
 
-		try {
-			setIsTranslating(true);
-			setTranslationError(null);
+  try {
+    setIsTranslating(true);
+    setTranslationError(null);
 
-			 const r = await fetch(SERVER_TRANSLATE_URL, {
-        		   method: 'POST',
-        		   headers: { 'Content-Type': 'application/json' },
-        		   body: JSON.stringify({ text: transcribedText, targetLanguage: selectedLanguage }),
-      			});
+    const response = await axios.post(
+      'https://deep-translate1.p.rapidapi.com/language/translate/v2',
+      {
+        q: transcribedText,
+        source: 'auto',
+        target: selectedLanguage,
+      },
+      {
+        headers: {
+          'Content-Type': 'application/json',
+          'X-RapidAPI-Key': '024a57ccf6msh5c52b309cd43b10p175985jsn70b5519fd8b0',
+          'X-RapidAPI-Host': 'deep-translate1.p.rapidapi.com',
+        },
+      }
+    );
 
-      			 const data = await r.json();
-      			 if (!r.ok || data.error) throw new Error(data.error || 'Translation failed');
+    const translated = response.data?.data?.translations?.translatedText;
+    setTranslatedText(translated);
+  } catch (error: any) {
+    console.error('Translation error:', error);
+    setTranslationError('Translation failed. Please try again.');
+  } finally {
+    setIsTranslating(false);
+  }
+};
 
-      		  setTranslatedText(data.translatedText);
-			
-		} catch (error: any) {
-			console.error('Translation error:', error);
-			setTranslationError(error.message || 'Failed to translate text');
-		} finally {
-			setIsTranslating(false);
-		}
-	}
+
 
 	function resetAll(resetUI = true) {
 		setTranscribedText('');

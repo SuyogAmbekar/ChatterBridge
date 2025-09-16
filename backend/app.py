@@ -11,6 +11,8 @@ from langdetect.lang_detect_exception import LangDetectException
 from typing import Dict, List, Tuple, Optional
 import logging
 from deep_translator import GoogleTranslator, MyMemoryTranslator
+import pandas as pd
+import gdown
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -146,16 +148,6 @@ class TranslationEngine:
             'kn': 'Kannada', 'gu': 'Gujarati', 'ml': 'Malayalam', 'pa': 'Punjabi',
             'mr': 'Marathi', 'or': 'Odia', 'as': 'Assamese', 'sa': 'Sanskrit',
             'ur': 'Urdu', 'dv': 'Dhivehi', 'ne': 'Nepali', 'si': 'Sinhala'
-        }
-        
-        # Context-aware translation hints for better quality
-        self.context_hints = {
-            'formal': 'Please translate this in a formal, professional tone.',
-            'casual': 'Please translate this in a casual, friendly tone.',
-            'technical': 'Please translate this maintaining technical accuracy.',
-            'literary': 'Please translate this preserving literary style and nuance.',
-            'medical': 'Please translate this maintaining medical terminology accuracy.',
-            'legal': 'Please translate this maintaining legal terminology precision.'
         }
     
     def get_supported_languages(self) -> Dict[str, any]:
@@ -646,6 +638,62 @@ def detect_language_text():
             "error": f"Language detection failed: {str(e)}"
         }), 500
 
+def download_sign_videos(csv_path="0d9cb69c-f024-49b2-b120-3da45e0f9bb6.csv", output_dir="sign_videos"):
+    df = pd.read_csv(csv_path)
+    os.makedirs(output_dir, exist_ok=True)
+    for _, row in df.iterrows():
+        sign = row["Folder Name"].strip()
+        link = row["Link"].strip()
+        sign_folder = os.path.join(output_dir, sign)
+        os.makedirs(sign_folder, exist_ok=True)
+        # Extract Google Drive ID
+        if "id=" in link:
+            file_id = link.split("id=")[-1]
+        elif "/folders/" in link:
+            file_id = link.split("/folders/")[-1].split("?")[0]
+        else:
+            continue
+        try:
+            gdown.download_folder(id=file_id, output=sign_folder, quiet=False, use_cookies=False)
+        except Exception as e:
+            print(f"Failed for {sign}: {e}")
+
+@app.route('/download-sign-dataset', methods=['POST'])
+def download_sign_dataset():
+    """Download Indian Sign Language videos from Google Drive links in CSV."""
+    try:
+        data = request.get_json()
+        csv_path = data.get("csv_path", "ISL_Dictionary_words.csv")
+        output_dir = data.get("output_dir", "sign_videos")
+        download_sign_videos(csv_path, output_dir)
+        return jsonify({"success": True, "message": "Dataset download started."})
+    except Exception as e:
+        return jsonify({"success": False, "error": str(e)}), 500
+
+@app.route('/sign-translate', methods=['POST'])
+def sign_translate():
+    """
+    Dummy endpoint for Indian Sign Language video translation.
+    Expects a video file upload as 'video'.
+    """
+    if 'video' not in request.files:
+        return jsonify({"success": False, "error": "No video file provided"}), 400
+    video_file = request.files['video']
+    if video_file.filename == '':
+        return jsonify({"success": False, "error": "No file selected"}), 400
+    with tempfile.NamedTemporaryFile(delete=False, suffix='.mp4') as temp_file:
+        video_file.save(temp_file.name)
+        temp_file_path = temp_file.name
+    try:
+        # Dummy logic: just return filename as translation
+        translation = os.path.basename(video_file.filename)
+        return jsonify({"success": True, "translation": translation})
+    except Exception as e:
+        return jsonify({"success": False, "error": str(e)}), 500
+    finally:
+        if os.path.exists(temp_file_path):
+            os.unlink(temp_file_path)
+
 if __name__ == '__main__':
     print("Starting Enhanced Speech Recognition & Translation Server...")
     print("Available endpoints:")
@@ -655,6 +703,8 @@ if __name__ == '__main__':
     print("- POST /translate - Translate text with context")
     print("- POST /translate-batch - Batch translation")
     print("- POST /detect-language - Language detection from text")
+    print("- POST /download-sign-dataset - Download sign language dataset")
+    print("- POST /sign-translate - Translate Indian Sign Language video")
     print("Features:")
     print("- Speech Recognition (speech_recognition)")
     print("- Text-to-Speech (pyttsx3)")
