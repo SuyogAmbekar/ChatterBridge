@@ -638,7 +638,7 @@ def detect_language_text():
             "error": f"Language detection failed: {str(e)}"
         }), 500
 
-def download_sign_videos(csv_path="0d9cb69c-f024-49b2-b120-3da45e0f9bb6.csv", output_dir="sign_videos"):
+def download_sign_videos(csv_path="ISL_Dictionary_words.csv", output_dir="sign_videos"):
     df = pd.read_csv(csv_path)
     os.makedirs(output_dir, exist_ok=True)
     for _, row in df.iterrows():
