@@ -1,29 +1,18 @@
-import { FontAwesome } from '@expo/vector-icons';
+import { Ionicons } from '@expo/vector-icons';
 import { Picker } from '@react-native-picker/picker';
 import axios from 'axios';
 import { Audio } from 'expo-av';
+import { LinearGradient } from 'expo-linear-gradient';
+import { useRouter } from 'expo-router';
 import * as Speech from 'expo-speech';
 import React, { useEffect, useRef, useState } from 'react';
-import { Alert, Animated, ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
+import { Alert, Animated, Dimensions, Easing, Modal, ScrollView, Text, TouchableOpacity, View } from 'react-native';
+import { SafeAreaView } from 'react-native-safe-area-context';
 import { languages } from '../select-language';
-import { theme } from '../theme';
-
-
-// Speech Recognition Implementation:
-// 1. Records audio using Expo Audio
-// 2. Attempts to use Web Speech API for real-time recognition
-// 3. Falls back to mock transcription if Web Speech API is unavailable
-// 4. Displays transcribed text in "What You Said" section
 
 const BAR_COUNT = 5;
-const BAR_HEIGHT = 100;
-const BAR_WIDTH = 12;
-const BAR_SPACING = 8;
-const BAR_COLORS = ['#4F46E5', '#06B6D4', '#22C55E', '#F59E0B', '#EF4444'];
-
 const SERVER_TRANSCRIBE_URL = 'http://192.168.1.33:3000/transcribe';
 const SERVER_TRANSLATE_URL = 'http://192.168.1.33:3000/translate';
-
 
 export default function SpeechScreen() {
 	const [recording, setRecording] = useState<Audio.Recording | undefined>();
@@ -34,55 +23,88 @@ export default function SpeechScreen() {
 	const [isTranscribing, setIsTranscribing] = useState(false);
 	const [transcribedText, setTranscribedText] = useState<string>('');
 	const [transcriptionError, setTranscriptionError] = useState<string | null>(null);
-	
-	// New states for enhanced features
-	const [detectedLanguage, setDetectedLanguage] = useState<string>('');
 	const [translatedText, setTranslatedText] = useState<string>('');
 	const [isTranslating, setIsTranslating] = useState(false);
 	const [translationError, setTranslationError] = useState<string | null>(null);
-	const [selectedContext, setSelectedContext] = useState<string>('auto');
+	const [detectedLanguage, setDetectedLanguage] = useState<string>('');
 	const [showTranslationOptions, setShowTranslationOptions] = useState(false);
-
-	const animations = useRef(
-		Array.from({ length: BAR_COUNT }, () => new Animated.Value(0))
-	).current;
+	const [showModal, setShowModal] = useState(false);
 
 	const pulseAnim = useRef(new Animated.Value(0)).current;
+	const loadingRotation = useRef(new Animated.Value(0)).current;
+	const loadingOpacity = useRef(new Animated.Value(0)).current;
+	const animations = useRef(Array.from({ length: BAR_COUNT }, () => new Animated.Value(0))).current;
 
 	useEffect(() => {
-	  if (isRecording) {
-	    const animationsArray = animations.map((anim) =>
-	      Animated.loop(
-		Animated.sequence([
-		  Animated.timing(anim, { toValue: 1, duration: 300, useNativeDriver: true, }),
-		  Animated.timing(anim, { toValue: 0, duration: 300, useNativeDriver: true, }),
-		 ])
-	       )
-	     );
-	     Animated.stagger(100, animationsArray).start();
+		let silenceTimer: ReturnType<typeof setInterval> | null = null;
+		let amplitudeInterval: ReturnType<typeof setInterval> | null = null;
 
-			// Pulsating ring animation
+		if (isRecording) {
+			// Simulate voice amplitude (0 to 1) for animation
+			const simulateAmplitude = () => Math.random() * 0.8 + 0.2; // Random amplitude between 0.2 and 1
+
+			// Animate pulse based on amplitude
+			amplitudeInterval = setInterval(() => {
+				const amplitude = simulateAmplitude();
+				Animated.timing(pulseAnim, {
+					toValue: amplitude,
+					duration: 100, // Fast updates for voice sync
+					useNativeDriver: true,
+				}).start();
+			}, 100);
+
+			// Silence detection: Stop after 2 seconds of low amplitude
+			silenceTimer = setInterval(() => {
+				const amplitude = simulateAmplitude();
+				if (amplitude < 0.3) { // Threshold for "silence"
+					stopRecording();
+				}
+			}, 2000);
+		} else {
+			pulseAnim.stopAnimation();
+			pulseAnim.setValue(0);
+			if (amplitudeInterval) clearInterval(amplitudeInterval);
+			if (silenceTimer) clearInterval(silenceTimer);
+		}
+
+		return () => {
+			if (amplitudeInterval) clearInterval(amplitudeInterval);
+			if (silenceTimer) clearInterval(silenceTimer);
+		};
+	}, [isRecording]);
+
+	useEffect(() => {
+		if (isTranscribing) {
+			// Start loading ring rotation and opacity animation
 			Animated.loop(
-				Animated.sequence([
-					Animated.timing(pulseAnim, {
+				Animated.parallel([
+					Animated.timing(loadingRotation, {
 						toValue: 1,
 						duration: 1200,
+						easing: Easing.linear,
 						useNativeDriver: true,
 					}),
-					Animated.timing(pulseAnim, {
-						toValue: 0,
-						duration: 0,
-						useNativeDriver: true,
-					}),
+					Animated.sequence([
+						Animated.timing(loadingOpacity, {
+							toValue: 1,
+							duration: 600,
+							useNativeDriver: true,
+						}),
+						Animated.timing(loadingOpacity, {
+							toValue: 0.4,
+							duration: 600,
+							useNativeDriver: true,
+						}),
+					]),
 				])
 			).start();
 		} else {
-			animations.forEach((anim) => anim.stopAnimation());
-			animations.forEach((anim) => anim.setValue(0));
-			pulseAnim.stopAnimation();
-			pulseAnim.setValue(0);
+			loadingRotation.stopAnimation();
+			loadingRotation.setValue(0);
+			loadingOpacity.stopAnimation();
+			loadingOpacity.setValue(0);
 		}
-	}, [isRecording]);
+	}, [isTranscribing]);
 
 	async function startRecording() {
 		try {
@@ -93,8 +115,7 @@ export default function SpeechScreen() {
 				Alert.alert('Permission Required', 'Microphone permission is needed to record audio.');
 				return;
 			}
-			
-			// Configure audio mode for recording
+
 			await Audio.setAudioModeAsync({
 				allowsRecordingIOS: true,
 				playsInSilentModeIOS: true,
@@ -103,7 +124,7 @@ export default function SpeechScreen() {
 			const { recording } = await Audio.Recording.createAsync(
 				Audio.RecordingOptionsPresets.HIGH_QUALITY
 			);
-			
+
 			setRecording(recording);
 			setIsRecording(true);
 			setShowDropdown(false);
@@ -121,22 +142,20 @@ export default function SpeechScreen() {
 
 	async function stopRecording() {
 		if (!recording) return;
-		
 		try {
 			setIsRecording(false);
 			await recording.stopAndUnloadAsync();
-			
-			// Reset audio mode
 			await Audio.setAudioModeAsync({
 				allowsRecordingIOS: false,
 				playsInSilentModeIOS: true,
 			});
-			
+
 			const uri = recording.getURI();
 			if (uri) {
 				await transcribeRecording(uri);
 			}
 			setShowDropdown(true);
+			setShowTranslationOptions(true);
 		} catch (err) {
 			console.error('Failed to stop recording', err);
 			Alert.alert('Recording Error', 'Failed to stop recording. Please try again.');
@@ -149,25 +168,23 @@ export default function SpeechScreen() {
 		try {
 			setIsTranscribing(true);
 			setTranscriptionError(null);
-			
-			// Convert audio to base64 for API
+
 			const response = await fetch(uri);
 			const blob = await response.blob();
 			const base64 = await blobToBase64(blob);
-			
+
 			const r = await fetch(SERVER_TRANSCRIBE_URL, {
-        			method: 'POST',
-        			headers: { 'Content-Type': 'application/json' },
-        			body: JSON.stringify({ audioBase64: base64 }),
-      			});
-     
+				method: 'POST',
+				headers: { 'Content-Type': 'application/json' },
+				body: JSON.stringify({ audioBase64: base64 }),
+			});
 
 			const data = await r.json();
-      			if (!r.ok || data.error) throw new Error(data.error || 'Transcription failed');
+			if (!r.ok || data.error) throw new Error(data.error || 'Transcription failed');
 
-      			setTranscribedText(data.text);
-				setShowTranslationOptions(true); 
-			
+			setTranscribedText(data.text);
+			setDetectedLanguage(data.detectedLanguage || 'Auto Detect');
+			setShowTranslationOptions(true);
 		} catch (error: any) {
 			console.error('Transcription error:', error);
 			setTranscriptionError(error.message || 'Failed to transcribe audio');
@@ -179,478 +196,363 @@ export default function SpeechScreen() {
 	async function blobToBase64(blob: Blob): Promise<string> {
 		return new Promise((resolve, reject) => {
 			const reader = new FileReader();
-			reader.onloadend = () => 
-		resolve((reader.result as string ).split(',')[1]);
+			reader.onloadend = () => resolve((reader.result as string).split(',')[1]);
 			reader.onerror = reject;
 			reader.readAsDataURL(blob);
 		});
 	}
 
-	const translateText = async () => {
-  if (!transcribedText || !selectedLanguage) return;
+	async function translateText() {
+		if (!transcribedText || !selectedLanguage) return;
 
-  try {
-    setIsTranslating(true);
-    setTranslationError(null);
+		try {
+			setIsTranslating(true);
+			setTranslationError(null);
 
-    const response = await axios.post(
-      'https://deep-translate1.p.rapidapi.com/language/translate/v2',
-      {
-        q: transcribedText,
-        source: 'auto',
-        target: selectedLanguage,
-      },
-      {
-        headers: {
-          'Content-Type': 'application/json',
-          'X-RapidAPI-Key': '024a57ccf6msh5c52b309cd43b10p175985jsn70b5519fd8b0',
-          'X-RapidAPI-Host': 'deep-translate1.p.rapidapi.com',
-        },
-      }
-    );
+			const response = await axios.post(
+				'https://deep-translate1.p.rapidapi.com/language/translate/v2',
+				{
+					q: transcribedText,
+					source: 'auto',
+					target: selectedLanguage,
+				},
+				{
+					headers: {
+						'Content-Type': 'application/json',
+						'X-RapidAPI-Key': '024a57ccf6msh5c52b309cd43b10p175985jsn70b5519fd8b0',
+						'X-RapidAPI-Host': 'deep-translate1.p.rapidapi.com',
+					},
+				}
+			);
 
-    const translated = response.data?.data?.translations?.translatedText;
-    setTranslatedText(translated);
-  } catch (error: any) {
-    console.error('Translation error:', error);
-    setTranslationError('Translation failed. Please try again.');
-  } finally {
-    setIsTranslating(false);
-  }
-};
-
-
+			const translated = response.data?.data?.translations?.translatedText;
+			setTranslatedText(translated);
+		} catch (error: any) {
+			console.error('Translation error:', error);
+			setTranslationError('Translation failed. Please try again.');
+		} finally {
+			setIsTranslating(false);
+		}
+	}
 
 	function resetAll(resetUI = true) {
 		setTranscribedText('');
 		setTranslatedText('');
-		if (resetUI)setSelectedLanguage(undefined);
+		if (resetUI) setSelectedLanguage(undefined);
 		setTranslationError(null);
 	}
 
-	// Function to speak the transcribed text
 	function speakText(text: string) {
-		Speech.speak(text, {
-			language: 'en',
-			pitch: 1,
-			rate: 0.8,
-		});
+		Speech.speak(text, { language: 'en', pitch: 1, rate: 0.8 });
 	}
 
+	const letters = [
+		{ char: 'C', color: 'text-orange-400' },
+		{ char: 'H', color: 'text-white' },
+		{ char: 'A', color: 'text-white' },
+		{ char: 'T', color: 'text-blue-400' },
+		{ char: 'T', color: 'text-blue-400' },
+		{ char: 'E', color: 'text-white' },
+		{ char: 'R', color: 'text-green-400' },
+	];
+
+	const letterAnimations = useRef(letters.map(() => new Animated.Value(0))).current;
+	const animationRefs = useRef<Animated.CompositeAnimation[]>([]).current;
+	const [isAnimating, setIsAnimating] = useState(false);
+
+	const toggleWave = () => {
+		if (!isAnimating) {
+			animationRefs.length = 0;
+			letters.forEach((_, index) => {
+				const anim = Animated.loop(
+					Animated.sequence([
+						Animated.timing(letterAnimations[index], { toValue: -10, duration: 300, useNativeDriver: true }),
+						Animated.timing(letterAnimations[index], { toValue: 0, duration: 300, useNativeDriver: true }),
+					])
+				);
+				animationRefs.push(anim);
+			});
+			Animated.stagger(100, animationRefs).start();
+		} else {
+			animationRefs.forEach((anim) => anim.stop());
+			letterAnimations.forEach((anim) => anim.setValue(0));
+		}
+		setIsAnimating(!isAnimating);
+	};
+
+	const router = useRouter();
+	const scale = useRef(new Animated.Value(1)).current;
+	const droplets = useRef(
+		Array.from({ length: 6 }, () => ({
+			x: new Animated.Value(0),
+			y: new Animated.Value(0),
+			opacity: new Animated.Value(0),
+		}))
+	).current;
+
+	const handlePress = () => {
+		Animated.sequence([
+			Animated.timing(scale, {
+				toValue: 1.6,
+				duration: 150,
+				useNativeDriver: true,
+			}),
+			Animated.timing(scale, {
+				toValue: 1,
+				duration: 150,
+				useNativeDriver: true,
+			}),
+		]).start(() => router.push({ pathname: '/welcome' }));
+
+		droplets.forEach((drop) => {
+			Animated.parallel([
+				Animated.timing(drop.x, {
+					toValue: Math.random() * 60 - 30,
+					duration: 300,
+					useNativeDriver: true,
+					easing: Easing.out(Easing.quad),
+				}),
+				Animated.timing(drop.y, {
+					toValue: Math.random() * -60,
+					duration: 300,
+					useNativeDriver: true,
+					easing: Easing.out(Easing.quad),
+				}),
+				Animated.sequence([
+					Animated.timing(drop.opacity, {
+						toValue: 1,
+						duration: 150,
+						useNativeDriver: true,
+					}),
+					Animated.timing(drop.opacity, {
+						toValue: 0,
+						duration: 150,
+						useNativeDriver: true,
+					}),
+				]),
+			]).start();
+		});
+	};
+
+	const screenWidth = Dimensions.get('window').width;
+	const [active, setActive] = useState(false);
+	const [inputHeight, setInputHeight] = useState(56);
+	const widthAnim = useRef(new Animated.Value(56)).current;
+
+	const handleIconClick = () => {
+		setActive(true);
+		Animated.timing(widthAnim, {
+			toValue: screenWidth - 40,
+			duration: 400,
+			useNativeDriver: false,
+		}).start();
+	};
+
 	return (
-		<ScrollView style={styles.container} contentContainerStyle={styles.contentContainer}>
-			<View style={styles.micWrapper}>
-				<Animated.View
-					style={[
-						styles.pulseRing,
-						{
-							transform: [
-								{ scale: pulseAnim.interpolate({ inputRange: [0, 1], outputRange: [1, 1.6] }) },
-							],
-							opacity: pulseAnim.interpolate({ inputRange: [0, 1], outputRange: [0.25, 0] }),
-						},
-					]}
-				/>
-				<TouchableOpacity
-					style={[styles.micButton, isRecording && styles.micButtonActive]}
-					onPress={isRecording ? stopRecording : startRecording}
-				>
-					<FontAwesome
-						name={isRecording ? 'stop' : 'microphone'}
-						size={48}
-						color={theme.colors.primaryText}
-					/>
-				</TouchableOpacity>
-			</View>
+		<LinearGradient colors={['#1f2937', '#000000']} className="flex-1">
+  <SafeAreaView className="flex-1">
+    {/* GT Clone UI Section */}
+    <View className="flex flex-row justify-between p-5 mb-5">
+      <TouchableOpacity onPress={toggleWave}>
+        <View className="flex flex-row items-center justify-center gap-1">
+          {letters.map((item, index) => (
+            <Animated.Text
+              key={index}
+              className={`font-bold text-[24px] ${item.color}`}
+              style={{ transform: [{ translateY: letterAnimations[index] }] }}
+            >
+              {item.char}
+            </Animated.Text>
+          ))}
+        </View>
+        <Text className="text-gray-300 text-[23px] ml-2">Translate</Text>
+      </TouchableOpacity>
 
-			<View style={styles.dancingBarsContainer}>
-				{animations.map((anim, index) => (
+      <TouchableOpacity
+        onPress={handlePress}
+        className="bg-purple-400 w-14 h-14 border border-purple-500 rounded-full overflow-hidden justify-center items-center"
+      >
+        <Animated.Image
+          source={require('../../assets/images/inner_logo.png')}
+          className="w-full h-full"
+          resizeMode="cover"
+          style={{ transform: [{ scale }] }}
+        />
+        {droplets.map((drop, i) => (
+          <Animated.View
+            key={i}
+            style={{
+              position: 'absolute',
+              width: 8,
+              height: 8,
+              borderRadius: 4,
+              backgroundColor: 'white',
+              transform: [{ translateX: drop.x }, { translateY: drop.y }],
+              opacity: drop.opacity,
+            }}
+          />
+        ))}
+      </TouchableOpacity>
+    </View>
+
+    {/* Container to show output */}
+    <View className="w-auto h-96 mb-6 ml-6 mr-6 bg-gray-800 rounded-xl border border-gray-800">
+      <ScrollView
+        contentContainerStyle={{
+          flexGrow: 1,
+          paddingHorizontal: 16, // px-4
+          paddingVertical: 16,   // py-4
+        }}
+      >
+        {transcribedText ? (
+          <View className="flex-row items-center gap-3 mb-3">
+            <Text
+              className="flex-1 text-lg text-white font-semibold bg-gray-700 p-4 rounded-lg"
+              numberOfLines={0}
+            >
+              {transcribedText}
+            </Text>
+            <TouchableOpacity
+              className="bg-[#007bff] p-3 rounded-full"
+              onPress={() => speakText(transcribedText)}
+            >
+              <Ionicons name="volume-high" size={15} color="white" />
+            </TouchableOpacity>
+          </View>
+        ) : null}
+
+        {translatedText ? (
+          <View className="flex-1 items-center justify-center mb-0">
+            <TouchableOpacity
+              activeOpacity={0.8}
+              className="bg-gray-700 w-12 h-12 rounded-full items-center justify-center"
+              onPress={() => { }}
+            >
+              <Ionicons name="swap-vertical" size={20} color="white" />
+            </TouchableOpacity>
+          </View>
+        ) : null}
+
+        {translatedText ? (
+          <View className="flex-row items-center gap-3 mt-3">
+            <Text
+              className="flex-1 text-lg text-white font-semibold bg-gray-700 p-4 rounded-lg"
+              numberOfLines={0}
+            >
+              {translatedText}
+            </Text>
+            <TouchableOpacity
+              className="bg-[#007bff] p-3 rounded-full"
+              onPress={() => speakText(translatedText)}
+            >
+              <Ionicons name="volume-high" size={15} color="white" />
+            </TouchableOpacity>
+          </View>
+        ) : null}
+      </ScrollView>
+    </View>
+
+    {/* Translation Options */}
+    <View className="w-full bg-transparent p-4 mb-4 flex items-center justify-center">
+      <View className="flex-row items-center justify-center mb-4">
+        <View className="bg-gray-700 rounded-lg px-4 py-2 mr-2 min-w-[100px] flex-row items-center justify-center">
+          <Text className="text-base text-gray-400 font-semibold">Auto Detect</Text>
+        </View>
+        <Ionicons name="swap-horizontal" size={24} color="#2d3748" className="mx-2" />
+        <TouchableOpacity
+          className="bg-gray-700 rounded-lg px-4 py-2 ml-2 min-w-[100px] flex-row items-center justify-center"
+          onPress={() => setShowModal(true)}
+        >
+          <Text className="text-base text-white font-semibold">
+            {selectedLanguage
+              ? languages.find((lang) => lang.value === selectedLanguage)?.label
+              : 'Select Language'}
+          </Text>
+        </TouchableOpacity>
+      </View>
+
+      <Modal
+        visible={showModal}
+        transparent={true}
+        animationType="fade"
+        onRequestClose={() => setShowModal(false)}
+      >
+        <View className="flex-1 bg-black/50 items-center justify-center">
+          <View className="w-[80%] bg-gray-600 rounded-lg border border-[#a0aec0] p-4">
+            <Picker
+              selectedValue={selectedLanguage}
+              onValueChange={(value) => {
+                setSelectedLanguage(value);
+                setShowModal(false);
+                if (transcribedText) translateText();
+              }}
+              className="h-12 text-white"
+            >
+              <Picker.Item label="Select language..." value={undefined} />
+              {languages.map((lang) => (
+                <Picker.Item key={lang.value} label={lang.label} value={lang.value} />
+              ))}
+            </Picker>
+            <TouchableOpacity
+              className="bg-[#a0aec0] py-2 px-4 rounded-full self-center mt-2"
+              onPress={() => setShowModal(false)}
+            >
+              <Text className="text-white text-base font-semibold">Cancel</Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+      </Modal>
+
+      <TouchableOpacity
+        className={`bg-purple-400 py-3 px-6 rounded-full self-center mt-2 ${
+          !selectedLanguage || isTranslating ? 'bg-[#a0aec0]' : ''
+        }`}
+        onPress={translateText}
+        disabled={!selectedLanguage || isTranslating}
+      >
+        <Text className="text-black text-base font-bold">
+          {isTranslating ? 'Translating...' : 'Translate'}
+        </Text>
+      </TouchableOpacity>
+    </View>
+
+				{/* Mic Section */}
+				<View className="mb-9 flex-1 items-center justify-center">
 					<Animated.View
-						key={index}
-						style={[
-							styles.bar,
-							{
-								backgroundColor: BAR_COLORS[index % BAR_COLORS.length],
-								transform: [
-									{
-										scaleY: anim.interpolate({
-											inputRange: [0, 1],
-											outputRange: [0.4, 1.8],
-										}),
-										},
-								],
-							},
-						]}
+						className="absolute w-28 h-28 rounded-full bg-blue-500"
+						style={{
+							transform: [
+								{ scale: pulseAnim.interpolate({ inputRange: [0, 1], outputRange: [1, 1.4] }) },
+							],
+							opacity: pulseAnim.interpolate({ inputRange: [0, 1], outputRange: [0.3, 0.1] }),
+							display: isRecording ? 'flex' : 'none', // Show only during recording
+						}}
 					/>
-				))}
-			</View>
-
-			<Text style={styles.statusText}>
-				{isRecording
-					? 'Recording... Speak now!'
-					: isTranscribing
-						? 'Processing your speech...'
-						: 'Tap the microphone to start speaking...'}
-			</Text>
-			
-			{/* Info about speech recognition */}
-			<Text style={styles.infoText}>
-				🎤 This app records your voice and converts it to text using speech recognition
-			</Text>
-
-			{/* Detected Language Display */}
-			{detectedLanguage ? (
-				<View style={styles.languageBox}>
-					<Text style={styles.languageTitle}>🎯 Detected Language</Text>
-					<Text style={styles.languageText}>{detectedLanguage}</Text>
-				</View>
-			) : null}
-
-			{/* Transcription Results */}
-			{transcribedText ? (
-				<View style={styles.transcriptionBox}>
-					<Text style={styles.transcriptionTitle}>🎤 What You Said:</Text>
-					<Text style={styles.transcribedText}>{transcribedText}</Text>
-					
-					{/* Speak Button */}
-					<TouchableOpacity 
-						style={styles.speakButton} 
-						onPress={() => speakText(transcribedText)}
-					>
-						<Text style={styles.speakButtonText}>🔊 Speak Text</Text>
-					</TouchableOpacity>
-				</View>
-			) : null}
-
-			{/* Translation Options */}
-			{showTranslationOptions && transcribedText && (
-				<View style={styles.translationOptionsContainer}>
-					<Text style={styles.sectionTitle}>🌍 Translation Options</Text>
-					
-
-					{/* Target Language Selection */}
-					<View style={styles.optionRow}>
-						<Text style={styles.optionLabel}>Target Language:</Text>
-						<Picker
-							selectedValue={selectedLanguage}
-							onValueChange={(value) => setSelectedLanguage(value)}
-							style={styles.languagePicker}
-						>
-							<Picker.Item label="Select language..." value={undefined} />
-							{languages.map((lang) => (
-								<Picker.Item key={lang.value} label={lang.label} value={lang.value} />
-							))}
-						</Picker>
-					</View>
-
-					{/* Translate Button */}
+					<Animated.View
+						className="absolute w-24 h-24 rounded-full border-4 border-blue-400"
+						style={{
+							borderStyle: 'dashed',
+							transform: [
+								{ rotate: loadingRotation.interpolate({ inputRange: [0, 1], outputRange: ['0deg', '360deg'] }) },
+							],
+							opacity: loadingOpacity,
+							display: isTranscribing ? 'flex' : 'none', // Show only during transcribing
+						}}
+					/>
 					<TouchableOpacity
-						style={[
-							styles.translateButton,
-							(!selectedLanguage || isTranslating) && styles.disabledButton
-						]}
-						onPress={translateText}
-						disabled={!selectedLanguage || isTranslating}
+						className={`w-20 h-20 rounded-full items-center justify-center shadow-md ${isRecording ? 'bg-purple-500' : 'bg-blue-600'
+							}`}
+						onPress={isRecording ? stopRecording : startRecording}
+						disabled={isTranscribing} // Disable during transcription
 					>
-						<Text style={styles.translateButtonText}>
-							{isTranslating ? 'Translating...' : '🚀 Translate'}
-						</Text>
+						<Ionicons
+							name={isRecording ? 'stop' : 'mic'}
+							size={36}
+							color="white"
+						/>
 					</TouchableOpacity>
 				</View>
-			)}
-
-			{/* Translation Results */}
-			{translatedText ? (
-				<View style={styles.translationBox}>
-					<Text style={styles.translationTitle}>🌐 Translated Text</Text>
-					<Text style={styles.translationText}>{translatedText}</Text>
-					
-					{/* Speak Translation Button */}
-					<TouchableOpacity 
-						style={styles.speakButton} 
-						onPress={() => speakText(translatedText)}
-					>
-						<Text style={styles.speakButtonText}>🔊 Speak Translation</Text>
-					</TouchableOpacity>
-				</View>
-			) : null}
-
-			{/* Error Messages */}
-			{transcriptionError ? (
-				<View style={styles.errorBox}>
-					<Text style={styles.errorTitle}>❌ Transcription Error</Text>
-					<Text style={styles.errorText}>{transcriptionError}</Text>
-				</View>
-			) : null}
-
-			{translationError ? (
-				<View style={styles.errorBox}>
-					<Text style={styles.errorTitle}>❌ Translation Error</Text>
-					<Text style={styles.errorText}>{translationError}</Text>
-				</View>
-			) : null}
-
-			{/* Reset Button */}
-			{(transcribedText || translatedText) && (
-				<TouchableOpacity style={styles.resetButton} onPress={() => resetAll(true)}>
-					<Text style={styles.resetButtonText}>🔄 Start New Session</Text>
-				</TouchableOpacity>
-			)}
-		</ScrollView>
+			</SafeAreaView>
+		</LinearGradient>
 	);
 }
-
-const styles = StyleSheet.create({
-	container: {
-		flex: 1,
-		backgroundColor: theme.colors.background,
-	},
-	contentContainer: {
-		flexGrow: 1,
-		justifyContent: 'center',
-		alignItems: 'center',
-		padding: 20,
-	},
-	micWrapper: {
-		marginBottom: 36,
-		alignItems: 'center',
-		justifyContent: 'center',
-	},
-	pulseRing: {
-		position: 'absolute',
-		width: 140,
-		height: 140,
-		borderRadius: 999,
-		backgroundColor: '#EF4444',
-	},
-	micButton: {
-		width: 120,
-		height: 120,
-		borderRadius: 999,
-		alignItems: 'center',
-		justifyContent: 'center',
-		backgroundColor: theme.colors.primary,
-		shadowColor: '#000',
-		shadowOffset: { width: 0, height: 2 },
-		shadowOpacity: 0.12,
-		shadowRadius: 6,
-		elevation: 4,
-	},
-	micButtonActive: {
-		backgroundColor: '#EF4444',
-	},
-	dancingBarsContainer: {
-		flexDirection: 'row',
-		alignItems: 'flex-end',
-		height: 110,
-		width: '86%',
-		justifyContent: 'space-around',
-		marginBottom: 24,
-	},
-	bar: {
-		width: BAR_WIDTH,
-		height: BAR_HEIGHT,
-		marginHorizontal: BAR_SPACING,
-		borderRadius: 10,
-		shadowColor: '#000',
-		shadowOffset: { width: 0, height: 2 },
-		shadowOpacity: 0.12,
-		shadowRadius: 6,
-		elevation: 4,
-	},
-	statusText: {
-		fontSize: 18,
-		color: 'gray',
-		marginBottom: 20,
-		textAlign: 'center',
-	},
-	infoText: {
-		fontSize: 14,
-		color: '#666',
-		marginBottom: 20,
-		textAlign: 'center',
-		fontStyle: 'italic',
-	},
-	sectionTitle: {
-		fontSize: 18,
-		fontWeight: 'bold',
-		marginBottom: 15,
-		color: '#333',
-		textAlign: 'center',
-	},
-	languageBox: {
-		width: '90%',
-		backgroundColor: '#e8f5e8',
-		borderRadius: 8,
-		padding: 12,
-		marginBottom: 15,
-		borderLeftWidth: 4,
-		borderLeftColor: '#4caf50',
-	},
-	languageTitle: {
-		fontSize: 16,
-		fontWeight: 'bold',
-		marginBottom: 6,
-		color: '#2e7d32',
-	},
-	languageText: {
-		fontSize: 16,
-		color: '#1b5e20',
-		fontWeight: '500',
-	},
-	transcriptionBox: {
-		width: '90%',
-		backgroundColor: '#e8f5e8',
-		borderRadius: 12,
-		padding: 20,
-		marginBottom: 20,
-		borderLeftWidth: 6,
-		borderLeftColor: '#4caf50',
-		shadowColor: '#000',
-		shadowOffset: {
-			width: 0,
-			height: 2,
-		},
-		shadowOpacity: 0.25,
-		shadowRadius: 3.84,
-		elevation: 5,
-	},
-	transcriptionTitle: {
-		fontSize: 18,
-		fontWeight: 'bold',
-		marginBottom: 12,
-		color: '#2e7d32',
-		textAlign: 'center',
-	},
-	transcribedText: {
-		fontSize: 18,
-		color: '#1b5e20',
-		lineHeight: 26,
-		fontWeight: '600',
-		textAlign: 'center',
-		backgroundColor: '#f1f8e9',
-		padding: 15,
-		borderRadius: 8,
-		borderWidth: 1,
-		borderColor: '#c8e6c9',
-		marginBottom: 15,
-	},
-	speakButton: {
-		backgroundColor: '#2196f3',
-		paddingVertical: 10,
-		paddingHorizontal: 20,
-		borderRadius: 20,
-		alignSelf: 'center',
-	},
-	speakButtonText: {
-		color: 'white',
-		fontSize: 14,
-		fontWeight: 'bold',
-	},
-	translationOptionsContainer: {
-		width: '90%',
-		backgroundColor: '#fff3e0',
-		borderRadius: 8,
-		padding: 15,
-		marginBottom: 15,
-		borderLeftWidth: 4,
-		borderLeftColor: '#ff9800',
-	},
-	optionRow: {
-		flexDirection: 'row',
-		alignItems: 'center',
-		marginBottom: 15,
-		justifyContent: "space-between",
-  		marginVertical: 8
-	},
-	optionLabel: {
-		fontSize: 16,
-		fontWeight: '600',
-		width: '35%',
-		color: '#e65100',
-	},
-	contextPicker: {
-		flex: 1,
-		height: 40,
-	},
-	languagePicker: {
-		flex: 1,                
-  		height: 50,             
-  		marginLeft: 10,         
-  		borderWidth: 1,         
-		paddingVertical: 9,
-		fontSize: 16,
-  		lineHeight: 22, 
-  		borderColor: "#ccc",   
-  		borderRadius: 8,        
-  		backgroundColor: "#fff" 
-	},
-	translateButton: {
-		backgroundColor: '#4caf50',
-		paddingVertical: 12,
-		paddingHorizontal: 24,
-		borderRadius: 25,
-		alignSelf: 'center',
-		marginTop: 10,
-	},
-	translateButtonText: {
-		color: 'white',
-		fontSize: 16,
-		fontWeight: 'bold',
-	},
-	disabledButton: {
-		backgroundColor: '#ccc',
-	},
-	translationBox: {
-		width: '90%',
-		backgroundColor: '#e3f2fd',
-		borderRadius: 8,
-		padding: 12,
-		marginBottom: 15,
-		borderLeftWidth: 4,
-		borderLeftColor: '#2196f3',
-	},
-	translationTitle: {
-		fontSize: 16,
-		fontWeight: 'bold',
-		marginBottom: 6,
-		color: '#1976d2',
-	},
-	translationText: {
-		fontSize: 16,
-		color: '#0d47a1',
-		lineHeight: 22,
-		marginBottom: 15,
-	},
-	errorBox: {
-		width: '90%',
-		backgroundColor: '#ffebee',
-		borderRadius: 8,
-		padding: 12,
-		marginBottom: 15,
-		borderLeftWidth: 4,
-		borderLeftColor: '#f44336',
-	},
-	errorTitle: {
-		fontSize: 16,
-		fontWeight: 'bold',
-		marginBottom: 6,
-		color: '#c62828',
-	},
-	errorText: {
-		fontSize: 16,
-		color: '#b71c1c',
-	},
-	resetButton: {
-		backgroundColor: '#9e9e9e',
-		paddingVertical: 12,
-		paddingHorizontal: 24,
-		borderRadius: 25,
-		marginTop: 20,
-	},
-	resetButtonText: {
-		color: 'white',
-		fontSize: 16,
-		fontWeight: 'bold',
-	},
-});
