@@ -1,4 +1,5 @@
 import { ResizeMode, Video } from "expo-av";
+import Constants from "expo-constants";
 import * as ImagePicker from "expo-image-picker";
 import { LinearGradient } from "expo-linear-gradient";
 import React, { useState } from "react";
@@ -12,6 +13,22 @@ import {
   View,
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
+
+// ✅ Safe server URL resolver
+const getServerUrl = () => {
+  const debuggerHost =
+    (Constants as any)?.manifest?.debuggerHost ||
+    (Constants as any)?.expoConfig?.hostUri;
+
+  if (debuggerHost) {
+    const ip = debuggerHost.split(":")[0];
+    return `http://${ip}:8000`;
+  }
+
+  return process.env.SERVER_URL || "http://192.168.1.33:8000";
+};
+
+const SERVER_URL = getServerUrl();
 
 export default function Sign() {
   const [imageUri, setImageUri] = useState<string | null>(null);
@@ -86,7 +103,7 @@ export default function Sign() {
       } as any);
 
       const response = await fetch(
-        `http://192.168.1.34:8000/${type === "image" ? "detect-sign" : "detect-video"}`,
+        `${SERVER_URL}/${type === "image" ? "detect-sign" : "detect-video"}`,
         {
           method: "POST",
           body: formData,
